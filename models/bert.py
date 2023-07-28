@@ -16,16 +16,16 @@ from torch.nn import functional as F
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, block_size: int, hidden_size: int):
+    def __init__(self, context_size: int, hidden_size: int):
         super().__init__()
         # create the positional encoding tensor of shape
         # maximum sequence length (MS) by embedding dimension (C)
-        pe = torch.zeros(block_size, hidden_size, dtype=torch.float)
+        pe = torch.zeros(context_size, hidden_size, dtype=torch.float)
 
         # pre-populate the position and the div_terms
-        position = torch.arange(block_size).unsqueeze(1)
+        position = torch.arange(context_size).unsqueeze(1)
         div_term = torch.exp(
-            torch.arange(0, hidden_size, 2) * (-math.log(10000) / block_size)
+            torch.arange(0, hidden_size, 2) * (-math.log(10000) / context_size)
         )
 
         # even positional encodings use sine, odd cosine
@@ -157,15 +157,15 @@ class TransformerBlock(nn.Module):
 
 class BERT(nn.Module):
     def __init__(self, num_layers:int, vocab_size:int, hidden_size:int, num_heads:int,
-                 block_size:int, expand_size:int, attention:nn.Module=BidirectionalAttention,
+                 context_size:int, expand_size:int, attention:nn.Module=BidirectionalAttention,
                  act:nn.Module=nn.GELU, embed_drop:float=0.1, attn_drop:float=0.1,
                  out_drop:float=0.1, ffn_drop:float=0.1, head_norm:bool=True,
                  tie_weights:bool=True, head_bias:bool=True, bias:bool=True):
         super().__init__()
-        # initialize vocab & positional embeddings to convert numericalied tokens
+        # initialize vocab & positional encodings to convert numericalied tokens
         # & position indicies to token and position vectors, with optional dropout
         self.vocab_embed = nn.Embedding(vocab_size, hidden_size)
-        self.pos_encode = PositionalEncoding(block_size, hidden_size)
+        self.pos_encode = PositionalEncoding(context_size, hidden_size)
         self.embed_drop = nn.Dropout(embed_drop)
 
         # initialize num_layers of transformer layers
@@ -185,20 +185,16 @@ class BERT(nn.Module):
         if tie_weights:
             self.head.weight = self.vocab_embed.weight
 
-        # precreate positional indices for the positional embedding
-        pos = torch.arange(0, block_size, dtype=torch.long)
-        self.register_buffer('pos', pos, persistent=False)
-
         self.apply(self._init_weights)
 
-    def forward(self, x: Tensor):
+    def forward(self, x: Tensor, return_preds:bool=True):
         # convert numericalized tokens of shape (B, S)
         # into token embeddings of shape (B, S, C)
         tokens = self.vocab_embed(x)
-        # shape (S, C)
+        # positional encodings are shape (S, C)
         pos = self.pos_encode(x)
 
-        # positional embeddings are added to token embeddings
+        # positional encodings are added to token embeddings
         x = self.embed_drop(tokens + pos)
 
         # pass token vectors through all transformer layers
@@ -208,8 +204,13 @@ class BERT(nn.Module):
         # apply optional pre-head normalization
         x = self.head_norm(x)
 
-        # the BERT head will be handeled in a inhereted modules
-        return x
+        # if MLM pretraining, don't predict outputs here
+        if return_preds:
+            # converts input token vectors of shape (B, S, C) to probability
+            # distribution of shape batch, sequence length, vocabulary size (B, S, VS)
+            return self.head(x)
+        else:
+            return x
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -228,13 +229,13 @@ class BERTForMaskedLM(BERT):
         self.mlm_prob = mlm_prob
 
     def forward(self, input_ids: Tensor, labels: Tensor, mlm_prob: float|None = None):
-        x = super().forward(input_ids)
+        x = super().forward(input_ids, False)
 
         # flatten both the labels and the intermediate outputs
         labels = labels.view(-1)
         x = x.view(labels.shape[0], -1)
 
-        # MLM masked tokens token values, not -100
+        # only select the masked tokens for predictions
         mask_tokens = labels != self.loss_fn.ignore_index
 
         # torch.compile with fullgraph cannot have dynamic shapes
@@ -247,8 +248,7 @@ class BERTForMaskedLM(BERT):
             num_masks = mask_tokens.sum().int()
         indices = torch.argsort(mask_tokens.int())[-num_masks:]
 
-        # only select the masked tokens for predictions
-        # reshapes x to (B*S, VS) and labels to (B*S)
+        # selecting the masked tokens reshapes x to (B*S, VS) and labels to (B*S)
         x = x[indices]
         labels = labels[indices]
 

@@ -40,7 +40,7 @@ class FeedForward(nn.Module):
 
 
 class CausalAttention(nn.Module):
-    def __init__(self, hidden_size:int, num_heads:int, block_size:int,
+    def __init__(self, hidden_size:int, num_heads:int, context_size:int,
                  attn_drop:float=0.1, out_drop:float=0.1, bias:bool=True):
         super().__init__()
         # input dimension must be divisible by num_heads
@@ -61,10 +61,10 @@ class CausalAttention(nn.Module):
         self.out_drop = nn.Dropout(out_drop)
 
         # causal mask to ensure that Attention is not applied to future tokens where
-        # block_size is the maximum sequence length of the transformer
+        # context_size is the maximum sequence length of the transformer
         self.register_buffer('causal_mask',
-            torch.triu(torch.ones([block_size, block_size], dtype=torch.bool), diagonal=1)
-                .view(1, 1, block_size, block_size), persistent=False
+            torch.triu(torch.ones([context_size, context_size], dtype=torch.bool), diagonal=1)
+                .view(1, 1, context_size, context_size), persistent=False
         )
 
     # boolean `mask` of shape (batch_size, sequence_length)
@@ -109,7 +109,7 @@ class CausalAttention(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, hidden_size:int, num_heads:int, block_size:int, expand_size:int,
+    def __init__(self, hidden_size:int, num_heads:int, context_size:int, expand_size:int,
                  attention:nn.Module=CausalAttention, act:nn.Module=nn.GELU,
                  attn_drop:float=0.1, out_drop:float=0.1, ffn_drop:float=0.1,
                  bias:bool=True):
@@ -118,7 +118,7 @@ class TransformerBlock(nn.Module):
         self.norm1 = nn.LayerNorm(hidden_size)
         # initialize the attention layer
         self.attn = attention(
-            hidden_size=hidden_size, num_heads=num_heads, block_size=block_size,
+            hidden_size=hidden_size, num_heads=num_heads, context_size=context_size,
             attn_drop=attn_drop, out_drop=out_drop, bias=bias
         )
 
@@ -140,7 +140,7 @@ class TransformerBlock(nn.Module):
 
 class GPT(nn.Module):
     def __init__(self, num_layers:int, vocab_size:int, hidden_size:int, num_heads:int,
-                 block_size:int, expand_size:int, attention:nn.Module=CausalAttention,
+                 context_size:int, expand_size:int, attention:nn.Module=CausalAttention,
                  act:nn.Module=nn.GELU, embed_drop:float=0.1, attn_drop:float=0.1,
                  out_drop:float=0.1, ffn_drop:float=0.1, head_norm:bool=True,
                  tie_weights:bool=True, head_bias:bool=True, bias:bool=True):
@@ -148,12 +148,12 @@ class GPT(nn.Module):
         # initialize vocab & positional embeddings to convert numericalied tokens
         # & position indicies to token and position vectors, with optional dropout
         self.vocab_embed = nn.Embedding(vocab_size, hidden_size)
-        self.pos_embed = nn.Embedding(block_size, hidden_size)
+        self.pos_embed = nn.Embedding(context_size, hidden_size)
         self.embed_drop = nn.Dropout(embed_drop)
 
         # initialize num_layers of transformer layers
         self.tfm_blocks = nn.ModuleList([TransformerBlock(
-                hidden_size=hidden_size, num_heads=num_heads, block_size=block_size,
+                hidden_size=hidden_size, num_heads=num_heads, context_size=context_size,
                 expand_size=expand_size, attention=attention, act=act, bias=bias,
                 attn_drop=attn_drop, out_drop=out_drop, ffn_drop=ffn_drop)
             for _ in range(num_layers)])
@@ -169,7 +169,7 @@ class GPT(nn.Module):
             self.head.weight = self.vocab_embed.weight
 
         # precreate positional indices for the positional embedding
-        pos = torch.arange(0, block_size, dtype=torch.long)
+        pos = torch.arange(0, context_size, dtype=torch.long)
         self.register_buffer('pos', pos, persistent=False)
 
         self.apply(self._init_weights)
@@ -178,7 +178,7 @@ class GPT(nn.Module):
         # convert numericalized tokens of shape (B, S)
         # into token embeddings of shape (B, S, C)
         tokens = self.vocab_embed(x)
-        # shape (S, C)
+        # positional embeddings are shape (S, C)
         pos = self.pos_embed(self.pos[:x.shape[1]])
 
         # positional embeddings are added to token embeddings

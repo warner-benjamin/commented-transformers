@@ -69,7 +69,7 @@ class BidirectionalAttention(nn.Module):
 
 
 class CausalAttention(nn.Module):
-    def __init__(self, hidden_size:int, num_heads:int, block_size:int,
+    def __init__(self, hidden_size:int, num_heads:int, context_size:int,
                  attn_drop:float=0.1, out_drop:float=0.1, bias:bool=True):
         super().__init__()
         # input dimension must be divisible by num_heads
@@ -90,10 +90,10 @@ class CausalAttention(nn.Module):
         self.out_drop = nn.Dropout(out_drop)
 
         # causal mask to ensure that Attention is not applied to future tokens where
-        # block_size is the maximum sequence length of the transformer
+        # context_size is the maximum sequence length of the transformer
         self.register_buffer('causal_mask',
-            torch.triu(torch.ones([block_size, block_size], dtype=torch.bool), diagonal=1)
-                .view(1, 1, block_size, block_size), persistent=False
+            torch.triu(torch.ones([context_size, context_size], dtype=torch.bool), diagonal=1)
+                .view(1, 1, context_size, context_size), persistent=False
         )
 
     # boolean `mask` of shape (batch_size, sequence_length)
@@ -140,7 +140,7 @@ class CausalCrossAttention(nn.Module):
     def __init__(self,
         hidden_size: int,
         num_heads: int,
-        block_size: int,
+        context_size: int,
         attn_drop: float = 0.1,
         out_drop: float = 0.1,
         bias: bool = True,
@@ -167,10 +167,10 @@ class CausalCrossAttention(nn.Module):
         self.out_drop = nn.Dropout(out_drop)
 
         # causal mask to ensure that Attention is not applied to future tokens where
-        # block_size is the maximum sequence length of the transformer
+        # context_size is the maximum sequence length of the transformer
         self.register_buffer('causal_mask',
-            torch.triu(torch.ones([block_size, block_size], dtype=torch.bool), diagonal=1)
-                .view(1, 1, block_size, block_size), persistent=False
+            torch.triu(torch.ones([context_size, context_size], dtype=torch.bool), diagonal=1)
+                .view(1, 1, context_size, context_size), persistent=False
         )
 
 
