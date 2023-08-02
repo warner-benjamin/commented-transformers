@@ -25,7 +25,7 @@ class PositionalEncoding(nn.Module):
         # pre-populate the position and the div_terms
         position = torch.arange(context_size).unsqueeze(1)
         div_term = torch.exp(
-            torch.arange(0, hidden_size, 2) * (-math.log(10000) / context_size)
+            torch.arange(0, hidden_size, 2) * (-math.log(10000) / hidden_size)
         )
 
         # even positional encodings use sine, odd cosine
